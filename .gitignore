@@ -21,8 +21,6 @@ wheels/
 
 # Virtual Environment
 venv/
-env/
-ENV/
 .env
 .venv
 
@@ -57,7 +55,6 @@ logs/
 terraform.rc
 .terraform.lock.hcl
 *.tfvars
-!deploy/terraform/env/prod.tfvars
 *.tfplan
 *.hcl
 crash.log

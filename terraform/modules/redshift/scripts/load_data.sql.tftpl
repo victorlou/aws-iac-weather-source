@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS ${environment}_weather_source_bronze.historical_temp 
   snowfall VARCHAR(100),
   spcHum VARCHAR(100),
   temp VARCHAR(100),
-  timestamp VARCHAR(100),
+  timestamp TIMESTAMP,
   vis VARCHAR(100),
   wetBulb VARCHAR(100),
   windChill VARCHAR(100),
@@ -30,35 +30,31 @@ CREATE TABLE IF NOT EXISTS ${environment}_weather_source_bronze.historical_temp 
   windSpd80m VARCHAR(100),
   latitude VARCHAR(100),
   longitude VARCHAR(100),
-  timezone VARCHAR(100),
+  timezone VARCHAR(50),
   elevation VARCHAR(100),
-  country_code VARCHAR(100),
+  country_code VARCHAR(2),
   country_name VARCHAR(100),
-  data_type VARCHAR(100),
-  processed_at VARCHAR(100)
+  data_type VARCHAR(50),
+  processed_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS ${environment}_weather_source_bronze.forecast_temp (
   cldCvr VARCHAR(100),
   dewPt VARCHAR(100),
   feelsLike VARCHAR(100),
-  freezingRainFlag VARCHAR(100),
   heatIndex VARCHAR(100),
-  icePelletsFlag VARCHAR(100),
   mslPres VARCHAR(100),
   precip VARCHAR(100),
-  presTend VARCHAR(100),
-  provisionalFlag VARCHAR(100),
+  precipProb VARCHAR(100),
   radSolar VARCHAR(100),
-  rainFlag VARCHAR(100),
   relHum VARCHAR(100),
   sfcPres VARCHAR(100),
-  snowFlag VARCHAR(100),
   snowfall VARCHAR(100),
+  snowfallProb VARCHAR(100),
   spcHum VARCHAR(100),
   temp VARCHAR(100),
-  timestamp VARCHAR(100),
-  vis VARCHAR(100),
+  timestamp TIMESTAMP,
+  timestampInit VARCHAR(100),
   wetBulb VARCHAR(100),
   windChill VARCHAR(100),
   windDir VARCHAR(100),
@@ -69,12 +65,12 @@ CREATE TABLE IF NOT EXISTS ${environment}_weather_source_bronze.forecast_temp (
   windSpd80m VARCHAR(100),
   latitude VARCHAR(100),
   longitude VARCHAR(100),
-  timezone VARCHAR(100),
+  timezone VARCHAR(50),
   elevation VARCHAR(100),
-  country_code VARCHAR(100),
+  country_code VARCHAR(2),
   country_name VARCHAR(100),
-  data_type VARCHAR(100),
-  processed_at VARCHAR(100)
+  data_type VARCHAR(50),
+  processed_at TIMESTAMP
 );
 
 -- Truncate temporary tables
@@ -91,15 +87,8 @@ FORMAT AS PARQUET
 ACCEPTINVCHARS AS '^'
 FILLRECORD;
 
--- Set default values for metadata columns after copy
-UPDATE ${environment}_weather_source_bronze.historical_temp 
-SET source_file = 's3://${data_bucket_name}/historical/',
-    created_at = GETDATE(),
-    updated_at = GETDATE(),
-    id = 'hist_' || LEFT(MD5(RANDOM()::TEXT), 32);
-
 COPY ${environment}_weather_source_bronze.forecast_temp (
-  cldCvr, dewPt, feelsLike, freezingRainFlag, heatIndex, icePelletsFlag, mslPres, precip, presTend, provisionalFlag, radSolar, rainFlag, relHum, sfcPres, snowFlag, snowfall, spcHum, temp, timestamp, vis, wetBulb, windChill, windDir, windDir100m, windDir80m, windSpd, windSpd100m, windSpd80m, latitude, longitude, timezone, elevation, country_code, country_name, data_type, processed_at
+  cldCvr, dewPt, feelsLike, heatIndex, mslPres, precip, precipProb, radSolar, relHum, sfcPres, snowfall, snowfallProb, spcHum, temp, timestamp, timestampInit, wetBulb, windChill, windDir, windDir100m, windDir80m, windSpd, windSpd100m, windSpd80m, latitude, longitude, timezone, elevation, country_code, country_name, data_type, processed_at
 )
 FROM 's3://${data_bucket_name}/forecast/'
 IAM_ROLE '${redshift_role_arn}'
@@ -107,61 +96,53 @@ FORMAT AS PARQUET
 ACCEPTINVCHARS AS '^'
 FILLRECORD;
 
--- Set default values for metadata columns after copy
-UPDATE ${environment}_weather_source_bronze.forecast_temp 
-SET source_file = 's3://${data_bucket_name}/forecast/',
-    created_at = GETDATE(),
-    updated_at = GETDATE(),
-    id = 'fcst_' || LEFT(MD5(RANDOM()::TEXT), 32);
-
 -- Merge historical data
 MERGE INTO ${environment}_weather_source_bronze.historical target
 USING (
     SELECT 
         'hist_' || LEFT(MD5(RANDOM()::TEXT), 32) as id,
-        CAST(t.latitude AS DECIMAL(9,6)) as latitude,
-        CAST(t.longitude AS DECIMAL(9,6)) as longitude,
+        CAST(CAST(NULLIF(NULLIF(t.latitude, 'nan'), 'None') AS FLOAT8) AS DECIMAL(9,6)) as latitude,
+        CAST(CAST(NULLIF(NULLIF(t.longitude, 'nan'), 'None') AS FLOAT8) AS DECIMAL(9,6)) as longitude,
         t.timezone,
         t.country_code,
         t.country_name,
-        t.subdiv_code,
-        t.subdiv_name,
-        t.grid,
-        CAST(t.elevation AS DECIMAL(10,2)) as elevation,
-        CAST(t.timestamp_utc AS TIMESTAMP) as timestamp_utc,
-        CAST(t.provisional_flag AS BOOLEAN) as provisional_flag,
-        CAST(t.cld_cvr AS DECIMAL(5,2)) as cld_cvr,
-        CAST(t.dew_pt AS DECIMAL(6,2)) as dew_pt,
-        CAST(t.feels_like AS DECIMAL(6,2)) as feels_like,
-        CAST(t.heat_index AS DECIMAL(6,2)) as heat_index,
-        CAST(t.msl_pres AS DECIMAL(8,2)) as msl_pres,
-        CAST(t.precip AS DECIMAL(6,2)) as precip,
-        CAST(t.pres_tend AS DECIMAL(6,2)) as pres_tend,
-        CAST(t.rad_solar AS DECIMAL(8,2)) as rad_solar,
-        CAST(t.rel_hum AS DECIMAL(5,2)) as rel_hum,
-        CAST(t.sfc_pres AS DECIMAL(8,2)) as sfc_pres,
-        CAST(t.snowfall AS DECIMAL(6,2)) as snowfall,
-        CAST(t.spc_hum AS DECIMAL(6,2)) as spc_hum,
-        CAST(t.temp AS DECIMAL(6,2)) as temp,
-        CAST(t.vis AS DECIMAL(6,2)) as vis,
-        CAST(t.wet_bulb AS DECIMAL(6,2)) as wet_bulb,
-        CAST(t.wind_chill AS DECIMAL(6,2)) as wind_chill,
-        CAST(t.wind_dir AS DECIMAL(6,2)) as wind_dir,
-        CAST(t.wind_dir_100m AS DECIMAL(6,2)) as wind_dir_100m,
-        CAST(t.wind_dir_80m AS DECIMAL(6,2)) as wind_dir_80m,
-        CAST(t.wind_spd AS DECIMAL(6,2)) as wind_spd,
-        CAST(t.wind_spd_100m AS DECIMAL(6,2)) as wind_spd_100m,
-        CAST(t.wind_spd_80m AS DECIMAL(6,2)) as wind_spd_80m,
-        CAST(t.rain_flag AS BOOLEAN) as rain_flag,
-        CAST(t.snow_flag AS BOOLEAN) as snow_flag,
+        CAST(CAST(NULLIF(NULLIF(t.elevation, 'nan'), 'None') AS FLOAT8) AS DECIMAL(10,2)) as elevation,
+        CAST(t.timestamp AS TIMESTAMP) as timestamp_utc,
+        CASE WHEN t.freezingRainFlag = 'true' OR t.freezingRainFlag = 't' THEN TRUE ELSE FALSE END as freezing_rain_flag,
+        CASE WHEN t.icePelletsFlag = 'true' OR t.icePelletsFlag = 't' THEN TRUE ELSE FALSE END as ice_pellets_flag,
+        CAST(CAST(NULLIF(NULLIF(t.presTend, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as pres_tend,
+        CASE WHEN t.provisionalFlag = 'true' OR t.provisionalFlag = 't' THEN TRUE ELSE FALSE END as provisional_flag,
+        CASE WHEN t.rainFlag = 'true' OR t.rainFlag = 't' THEN TRUE ELSE FALSE END as rain_flag,
+        CASE WHEN t.snowFlag = 'true' OR t.snowFlag = 't' THEN TRUE ELSE FALSE END as snow_flag,
+        CAST(CAST(NULLIF(NULLIF(t.vis, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as vis,
+        CAST(CAST(NULLIF(NULLIF(t.cldCvr, 'nan'), 'None') AS FLOAT8) AS DECIMAL(5,2)) as cld_cvr,
+        CAST(CAST(NULLIF(NULLIF(t.dewPt, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as dew_pt,
+        CAST(CAST(NULLIF(NULLIF(t.feelsLike, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as feels_like,
+        CAST(CAST(NULLIF(NULLIF(t.heatIndex, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as heat_index,
+        CAST(CAST(NULLIF(NULLIF(t.mslPres, 'nan'), 'None') AS FLOAT8) AS DECIMAL(8,2)) as msl_pres,
+        CAST(CAST(NULLIF(NULLIF(t.precip, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as precip,
+        CAST(CAST(NULLIF(NULLIF(t.radSolar, 'nan'), 'None') AS FLOAT8) AS DECIMAL(8,2)) as rad_solar,
+        CAST(CAST(NULLIF(NULLIF(t.relHum, 'nan'), 'None') AS FLOAT8) AS DECIMAL(5,2)) as rel_hum,
+        CAST(CAST(NULLIF(NULLIF(t.sfcPres, 'nan'), 'None') AS FLOAT8) AS DECIMAL(8,2)) as sfc_pres,
+        CAST(CAST(NULLIF(NULLIF(t.snowfall, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as snowfall,
+        CAST(CAST(NULLIF(NULLIF(t.spcHum, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as spc_hum,
+        CAST(CAST(NULLIF(NULLIF(t.temp, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as temp,
+        CAST(CAST(NULLIF(NULLIF(t.wetBulb, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wet_bulb,
+        CAST(CAST(NULLIF(NULLIF(t.windChill, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_chill,
+        CAST(CAST(NULLIF(NULLIF(t.windDir, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_dir,
+        CAST(CAST(NULLIF(NULLIF(t.windDir100m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_dir_100m,
+        CAST(CAST(NULLIF(NULLIF(t.windDir80m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_dir_80m,
+        CAST(CAST(NULLIF(NULLIF(t.windSpd, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_spd,
+        CAST(CAST(NULLIF(NULLIF(t.windSpd100m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_spd_100m,
+        CAST(CAST(NULLIF(NULLIF(t.windSpd80m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_spd_80m,
         's3://${data_bucket_name}/historical/' as source_file,
         GETDATE() as created_at,
         GETDATE() as updated_at
     FROM ${environment}_weather_source_bronze.historical_temp t
 ) source
-ON target.timestamp_utc = CAST(source."timestamp" AS TIMESTAMP)
-   AND target.latitude = CAST(source.latitude AS DECIMAL(9,6))
-   AND target.longitude = CAST(source.longitude AS DECIMAL(9,6))
+ON target.timestamp_utc = source.timestamp_utc
+   AND target.latitude = source.latitude
+   AND target.longitude = source.longitude
 WHEN MATCHED THEN
   UPDATE SET
     latitude = source.latitude,
@@ -169,9 +150,6 @@ WHEN MATCHED THEN
     timezone = source.timezone,
     country_code = source.country_code,
     country_name = source.country_name,
-    subdiv_code = source.subdiv_code,
-    subdiv_name = source.subdiv_name,
-    grid = source.grid,
     elevation = source.elevation,
     provisional_flag = source.provisional_flag,
     cld_cvr = source.cld_cvr,
@@ -201,55 +179,73 @@ WHEN MATCHED THEN
     updated_at = GETDATE(),
     source_file = source.source_file
 WHEN NOT MATCHED THEN
-  INSERT VALUES (source.*);
+  INSERT (
+    id, latitude, longitude, timezone, country_code, country_name, elevation,
+    timestamp_utc, freezing_rain_flag, ice_pellets_flag, pres_tend,
+    provisional_flag, rain_flag, snow_flag, vis, cld_cvr, dew_pt,
+    feels_like, heat_index, msl_pres, precip, rad_solar, rel_hum,
+    sfc_pres, snowfall, spc_hum, temp, wet_bulb, wind_chill,
+    wind_dir, wind_dir_100m, wind_dir_80m, wind_spd, wind_spd_100m,
+    wind_spd_80m, source_file, created_at, updated_at
+  )
+  VALUES (
+    source.id, source.latitude, source.longitude, source.timezone,
+    source.country_code, source.country_name, source.elevation,
+    source.timestamp_utc, source.freezing_rain_flag, source.ice_pellets_flag,
+    source.pres_tend, source.provisional_flag, source.rain_flag,
+    source.snow_flag, source.vis, source.cld_cvr, source.dew_pt,
+    source.feels_like, source.heat_index, source.msl_pres, source.precip,
+    source.rad_solar, source.rel_hum, source.sfc_pres, source.snowfall,
+    source.spc_hum, source.temp, source.wet_bulb, source.wind_chill,
+    source.wind_dir, source.wind_dir_100m, source.wind_dir_80m,
+    source.wind_spd, source.wind_spd_100m, source.wind_spd_80m,
+    source.source_file, source.created_at, source.updated_at
+  );
 
 -- Merge forecast data
 MERGE INTO ${environment}_weather_source_bronze.forecast target
 USING (
     SELECT 
         'fcst_' || LEFT(MD5(RANDOM()::TEXT), 32) as id,
-        CAST(t.latitude AS DECIMAL(9,6)) as latitude,
-        CAST(t.longitude AS DECIMAL(9,6)) as longitude,
+        CAST(CAST(NULLIF(NULLIF(t.latitude, 'nan'), 'None') AS FLOAT8) AS DECIMAL(9,6)) as latitude,
+        CAST(CAST(NULLIF(NULLIF(t.longitude, 'nan'), 'None') AS FLOAT8) AS DECIMAL(9,6)) as longitude,
         t.timezone,
         t.country_code,
         t.country_name,
-        t.subdiv_code,
-        t.subdiv_name,
-        t.grid,
-        CAST(t.elevation AS DECIMAL(10,2)) as elevation,
-        CAST(t.timestamp_utc AS TIMESTAMP) as timestamp_utc,
-        CAST(t.timestamp_init_utc AS TIMESTAMP) as timestamp_init_utc,
-        CAST(t.cld_cvr AS DECIMAL(5,2)) as cld_cvr,
-        CAST(t.dew_pt AS DECIMAL(6,2)) as dew_pt,
-        CAST(t.feels_like AS DECIMAL(6,2)) as feels_like,
-        CAST(t.heat_index AS DECIMAL(6,2)) as heat_index,
-        CAST(t.msl_pres AS DECIMAL(8,2)) as msl_pres,
-        CAST(t.precip AS DECIMAL(6,2)) as precip,
-        CAST(t.precip_prob AS DECIMAL(5,2)) as precip_prob,
-        CAST(t.rad_solar AS DECIMAL(8,2)) as rad_solar,
-        CAST(t.rel_hum AS DECIMAL(5,2)) as rel_hum,
-        CAST(t.sfc_pres AS DECIMAL(8,2)) as sfc_pres,
-        CAST(t.snowfall AS DECIMAL(6,2)) as snowfall,
-        CAST(t.snowfall_prob AS DECIMAL(5,2)) as snowfall_prob,
-        CAST(t.spc_hum AS DECIMAL(6,2)) as spc_hum,
-        CAST(t.temp AS DECIMAL(6,2)) as temp,
-        CAST(t.wet_bulb AS DECIMAL(6,2)) as wet_bulb,
-        CAST(t.wind_chill AS DECIMAL(6,2)) as wind_chill,
-        CAST(t.wind_dir AS DECIMAL(6,2)) as wind_dir,
-        CAST(t.wind_dir_100m AS DECIMAL(6,2)) as wind_dir_100m,
-        CAST(t.wind_dir_80m AS DECIMAL(6,2)) as wind_dir_80m,
-        CAST(t.wind_spd AS DECIMAL(6,2)) as wind_spd,
-        CAST(t.wind_spd_100m AS DECIMAL(6,2)) as wind_spd_100m,
-        CAST(t.wind_spd_80m AS DECIMAL(6,2)) as wind_spd_80m,
+        CAST(CAST(NULLIF(NULLIF(t.elevation, 'nan'), 'None') AS FLOAT8) AS DECIMAL(10,2)) as elevation,
+        CAST(t.timestamp AS TIMESTAMP) as timestamp_utc,
+        CAST(REPLACE(t.timestampInit, 'Z', '') AS TIMESTAMP) as timestamp_init_utc,
+        CAST(CAST(NULLIF(NULLIF(t.cldCvr, 'nan'), 'None') AS FLOAT8) AS DECIMAL(5,2)) as cld_cvr,
+        CAST(CAST(NULLIF(NULLIF(t.dewPt, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as dew_pt,
+        CAST(CAST(NULLIF(NULLIF(t.feelsLike, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as feels_like,
+        CAST(CAST(NULLIF(NULLIF(t.heatIndex, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as heat_index,
+        CAST(CAST(NULLIF(NULLIF(t.mslPres, 'nan'), 'None') AS FLOAT8) AS DECIMAL(8,2)) as msl_pres,
+        CAST(CAST(NULLIF(NULLIF(t.precip, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as precip,
+        CAST(CAST(NULLIF(NULLIF(t.precipProb, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as precip_prob,
+        CAST(CAST(NULLIF(NULLIF(t.radSolar, 'nan'), 'None') AS FLOAT8) AS DECIMAL(8,2)) as rad_solar,
+        CAST(CAST(NULLIF(NULLIF(t.relHum, 'nan'), 'None') AS FLOAT8) AS DECIMAL(5,2)) as rel_hum,
+        CAST(CAST(NULLIF(NULLIF(t.sfcPres, 'nan'), 'None') AS FLOAT8) AS DECIMAL(8,2)) as sfc_pres,
+        CAST(CAST(NULLIF(NULLIF(t.snowfall, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as snowfall,
+        CAST(CAST(NULLIF(NULLIF(t.snowfallProb, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as snowfall_prob,
+        CAST(CAST(NULLIF(NULLIF(t.spcHum, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as spc_hum,
+        CAST(CAST(NULLIF(NULLIF(t.temp, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as temp,
+        CAST(CAST(NULLIF(NULLIF(t.wetBulb, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wet_bulb,
+        CAST(CAST(NULLIF(NULLIF(t.windChill, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_chill,
+        CAST(CAST(NULLIF(NULLIF(t.windDir, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_dir,
+        CAST(CAST(NULLIF(NULLIF(t.windDir100m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_dir_100m,
+        CAST(CAST(NULLIF(NULLIF(t.windDir80m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_dir_80m,
+        CAST(CAST(NULLIF(NULLIF(t.windSpd, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_spd,
+        CAST(CAST(NULLIF(NULLIF(t.windSpd100m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_spd_100m,
+        CAST(CAST(NULLIF(NULLIF(t.windSpd80m, 'nan'), 'None') AS FLOAT8) AS DECIMAL(6,2)) as wind_spd_80m,
         's3://${data_bucket_name}/forecast/' as source_file,
         GETDATE() as created_at,
         GETDATE() as updated_at
     FROM ${environment}_weather_source_bronze.forecast_temp t
 ) source
-ON target.timestamp_utc = CAST(source."timestamp" AS TIMESTAMP)
-   AND target.timestamp_init_utc = CAST(source.timestampInit AS TIMESTAMP)
-   AND target.latitude = CAST(source.latitude AS DECIMAL(9,6))
-   AND target.longitude = CAST(source.longitude AS DECIMAL(9,6))
+ON target.timestamp_utc = source.timestamp_utc
+   AND target.timestamp_init_utc = source.timestamp_init_utc
+   AND target.latitude = source.latitude
+   AND target.longitude = source.longitude
 WHEN MATCHED THEN
   UPDATE SET
     latitude = source.latitude,
@@ -257,9 +253,6 @@ WHEN MATCHED THEN
     timezone = source.timezone,
     country_code = source.country_code,
     country_name = source.country_name,
-    subdiv_code = source.subdiv_code,
-    subdiv_name = source.subdiv_name,
-    grid = source.grid,
     elevation = source.elevation,
     cld_cvr = source.cld_cvr,
     dew_pt = source.dew_pt,
@@ -286,7 +279,27 @@ WHEN MATCHED THEN
     updated_at = GETDATE(),
     source_file = source.source_file
 WHEN NOT MATCHED THEN
-  INSERT VALUES (source.*);
+  INSERT (
+    id, latitude, longitude, timezone, country_code, country_name,
+    elevation, timestamp_utc, timestamp_init_utc, cld_cvr, dew_pt,
+    feels_like, heat_index, msl_pres, precip, precip_prob, rad_solar,
+    rel_hum, sfc_pres, snowfall, snowfall_prob, spc_hum, temp,
+    wet_bulb, wind_chill, wind_dir, wind_dir_100m, wind_dir_80m,
+    wind_spd, wind_spd_100m, wind_spd_80m, source_file, created_at,
+    updated_at
+  )
+  VALUES (
+    source.id, source.latitude, source.longitude, source.timezone,
+    source.country_code, source.country_name, source.elevation,
+    source.timestamp_utc, source.timestamp_init_utc, source.cld_cvr,
+    source.dew_pt, source.feels_like, source.heat_index, source.msl_pres,
+    source.precip, source.precip_prob, source.rad_solar, source.rel_hum,
+    source.sfc_pres, source.snowfall, source.snowfall_prob, source.spc_hum,
+    source.temp, source.wet_bulb, source.wind_chill, source.wind_dir,
+    source.wind_dir_100m, source.wind_dir_80m, source.wind_spd,
+    source.wind_spd_100m, source.wind_spd_80m, source.source_file,
+    source.created_at, source.updated_at
+  );
 
 -- Drop temporary tables
 DROP TABLE IF EXISTS ${environment}_weather_source_bronze.historical_temp;

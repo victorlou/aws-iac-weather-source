@@ -462,13 +462,39 @@ resource "aws_iam_role_policy" "eventbridge_scheduler" {
           "redshift:GetScheduledQueryHistory",
           "redshift:ListScheduledQueries",
           "redshift:DescribeSchedules",
+          "redshift:CreateSchedule",
+          "redshift:ModifySchedule",
+          "redshift:DeleteSchedule",
           "scheduler.redshift.amazonaws.com:GetSchedule",
           "scheduler.redshift.amazonaws.com:ListSchedules",
+          "scheduler.redshift.amazonaws.com:CreateSchedule",
+          "scheduler.redshift.amazonaws.com:DeleteSchedule",
+          "scheduler.redshift.amazonaws.com:UpdateSchedule",
           "redshift:BatchGetSchedules",
           "redshift:ResumeSchedule",
-          "redshift:PauseSchedule"
+          "redshift:PauseSchedule",
+          "redshift-data:ExecuteStatement",
+          "redshift-data:CancelStatement",
+          "redshift-data:DescribeStatement",
+          "redshift-data:GetStatementResult",
+          "redshift-data:ListStatements",
+          "redshift:GetClusterCredentials",
+          "redshift:CreateScheduledAction",
+          "redshift:ModifyScheduledAction",
+          "redshift:DeleteScheduledAction",
+          "redshift:DescribeScheduledActions"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          aws_iam_role.redshift.arn,
+          aws_iam_role.eventbridge.arn
+        ]
       }
     ]
   })
@@ -499,12 +525,117 @@ resource "aws_iam_group_policy" "admins_redshift_view" {
           "redshift-data:ListDatabases",
           "redshift-data:ListSchemas",
           "redshift-data:ListTables",
-          "redshift-data:DescribeTable"
+          "redshift-data:DescribeTable",
+          "redshift:DescribeScheduledActions",
+          "redshift:BatchGetSchedules",
+          "scheduler.redshift.amazonaws.com:GetSchedule",
+          "scheduler.redshift.amazonaws.com:ListSchedules",
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
         ]
         Resource = "*"
       }
     ]
   })
+}
+
+# Add CloudWatch Logs policy for EventBridge
+resource "aws_iam_role_policy" "eventbridge_logs" {
+  name = "${var.environment}-weather-source-eventbridge-logs"
+  role = aws_iam_role.eventbridge.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:GetLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/events/*",
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/redshift/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Add Redshift Scheduler policy
+resource "aws_iam_role_policy" "redshift_scheduler" {
+  name = "${var.environment}-weather-source-redshift-scheduler"
+  role = aws_iam_role.redshift.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "redshift:CreateScheduledAction",
+          "redshift:ModifyScheduledAction",
+          "redshift:DeleteScheduledAction",
+          "redshift:DescribeScheduledActions",
+          "redshift:ExecuteQuery",
+          "redshift:FetchResults",
+          "redshift:CancelQuery",
+          "redshift:DescribeTable",
+          "redshift:GetClusterCredentials",
+          "redshift:GetScheduledQueryHistory",
+          "redshift:ListScheduledQueries",
+          "redshift:DescribeSchedules",
+          "redshift:CreateSchedule",
+          "redshift:ModifySchedule",
+          "redshift:DeleteSchedule",
+          "redshift:BatchGetSchedules",
+          "redshift:ResumeSchedule",
+          "redshift:PauseSchedule",
+          "scheduler.redshift.amazonaws.com:GetSchedule",
+          "scheduler.redshift.amazonaws.com:ListSchedules",
+          "scheduler.redshift.amazonaws.com:CreateSchedule",
+          "scheduler.redshift.amazonaws.com:DeleteSchedule",
+          "scheduler.redshift.amazonaws.com:UpdateSchedule",
+          "redshift-data:ExecuteStatement",
+          "redshift-data:CancelStatement",
+          "redshift-data:DescribeStatement",
+          "redshift-data:GetStatementResult",
+          "redshift-data:ListStatements",
+          "redshift-data:ListDatabases",
+          "redshift-data:ListSchemas",
+          "redshift-data:ListTables",
+          "redshift-data:DescribeTable"
+        ]
+        Resource = [
+          aws_redshift_cluster.main.arn,
+          "${aws_redshift_cluster.main.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:redshift/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Add CloudWatch monitoring for Redshift scheduled queries
+resource "aws_cloudwatch_log_group" "redshift_scheduled_queries" {
+  name              = "/aws/redshift/${var.environment}/scheduled-queries"
+  retention_in_days = 14
+
+  tags = local.common_tags
 }
 
 # End of file
