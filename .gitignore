@@ -59,6 +59,7 @@ terraform.rc
 *.tfvars
 !deploy/terraform/env/prod.tfvars
 *.tfplan
+*.hcl
 crash.log
 
 # OS specific
@@ -67,3 +68,6 @@ Thumbs.db
 *.bak
 *.tmp
 *.temp
+
+# Generated SQL files
+*_generated.sql

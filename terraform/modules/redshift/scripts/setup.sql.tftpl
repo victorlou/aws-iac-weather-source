@@ -1,0 +1,104 @@
+-- Create schemas
+CREATE SCHEMA IF NOT EXISTS ${environment}_weather_source_bronze;
+CREATE SCHEMA IF NOT EXISTS ${environment}_weather_source_silver;
+CREATE SCHEMA IF NOT EXISTS ${environment}_weather_source_gold; 
+
+-- Create historical table in bronze layer
+CREATE TABLE IF NOT EXISTS ${environment}_weather_source_bronze.historical (
+  id VARCHAR(40) NOT NULL DEFAULT 'hist_' || LEFT(MD5(RANDOM()::TEXT), 32),
+  city VARCHAR(50),
+  latitude DECIMAL(9,6),
+  longitude DECIMAL(9,6),
+  timezone VARCHAR(50),
+  country_code CHAR(2),
+  country_name VARCHAR(100),
+  subdiv_code CHAR(5),
+  subdiv_name VARCHAR(100),
+  grid VARCHAR(50),
+  elevation DECIMAL(10,2),
+  timestamp_utc TIMESTAMP,
+  provisional_flag BOOLEAN,
+  cld_cvr DECIMAL(5,2),
+  dew_pt DECIMAL(6,2),
+  feels_like DECIMAL(6,2),
+  heat_index DECIMAL(6,2),
+  msl_pres DECIMAL(8,2),
+  precip DECIMAL(6,2),
+  pres_tend DECIMAL(6,2),
+  rad_solar DECIMAL(8,2),
+  rel_hum DECIMAL(5,2),
+  sfc_pres DECIMAL(8,2),
+  snowfall DECIMAL(6,2),
+  spc_hum DECIMAL(6,2),
+  temp DECIMAL(6,2),
+  vis DECIMAL(6,2),
+  wet_bulb DECIMAL(6,2),
+  wind_chill DECIMAL(6,2),
+  wind_dir DECIMAL(6,2),
+  wind_dir_100m DECIMAL(6,2),
+  wind_dir_80m DECIMAL(6,2),
+  wind_spd DECIMAL(6,2),
+  wind_spd_100m DECIMAL(6,2),
+  wind_spd_80m DECIMAL(6,2),
+  freezing_rain_flag BOOLEAN,
+  ice_pellets_flag BOOLEAN,
+  rain_flag BOOLEAN,
+  snow_flag BOOLEAN,
+  created_at TIMESTAMP DEFAULT GETDATE(),
+  updated_at TIMESTAMP,
+  source_file VARCHAR(200) NOT NULL DEFAULT '',
+  PRIMARY KEY (id)
+)
+DISTKEY(city)
+SORTKEY(timestamp_utc);
+
+-- Create forecast table in bronze layer
+CREATE TABLE IF NOT EXISTS ${environment}_weather_source_bronze.forecast (
+  id VARCHAR(40) NOT NULL DEFAULT 'fcst_' || LEFT(MD5(RANDOM()::TEXT), 32),
+  city VARCHAR(50),
+  latitude DECIMAL(9,6),
+  longitude DECIMAL(9,6),
+  timezone VARCHAR(50),
+  country_code CHAR(2),
+  country_name VARCHAR(100),
+  subdiv_code CHAR(5),
+  subdiv_name VARCHAR(100),
+  grid VARCHAR(50),
+  elevation DECIMAL(10,2),
+  timestamp_utc TIMESTAMP,
+  timestamp_init_utc TIMESTAMP,
+  cld_cvr DECIMAL(5,2),
+  dew_pt DECIMAL(6,2),
+  feels_like DECIMAL(6,2),
+  heat_index DECIMAL(6,2),
+  msl_pres DECIMAL(8,2),
+  precip DECIMAL(6,2),
+  precip_prob DECIMAL(5,2),
+  rad_solar DECIMAL(8,2),
+  rel_hum DECIMAL(5,2),
+  sfc_pres DECIMAL(8,2),
+  snowfall DECIMAL(6,2),
+  snowfall_prob DECIMAL(5,2),
+  spc_hum DECIMAL(6,2),
+  temp DECIMAL(6,2),
+  wet_bulb DECIMAL(6,2),
+  wind_chill DECIMAL(6,2),
+  wind_dir DECIMAL(6,2),
+  wind_dir_100m DECIMAL(6,2),
+  wind_dir_80m DECIMAL(6,2),
+  wind_spd DECIMAL(6,2),
+  wind_spd_100m DECIMAL(6,2),
+  wind_spd_80m DECIMAL(6,2),
+  created_at TIMESTAMP DEFAULT GETDATE(),
+  updated_at TIMESTAMP,
+  source_file VARCHAR(200) NOT NULL DEFAULT '',
+  PRIMARY KEY (id)
+)
+DISTKEY(city)
+SORTKEY(timestamp_utc, timestamp_init_utc);
+
+-- Grant permissions
+GRANT USAGE ON SCHEMA ${environment}_weather_source_bronze TO PUBLIC;
+GRANT USAGE ON SCHEMA ${environment}_weather_source_silver TO PUBLIC;
+GRANT USAGE ON SCHEMA ${environment}_weather_source_gold TO PUBLIC;
+GRANT SELECT ON ALL TABLES IN SCHEMA ${environment}_weather_source_bronze TO PUBLIC;
