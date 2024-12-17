@@ -1,0 +1,34 @@
+# Environment
+environment = "prod"                    # Environment name (e.g., prod, dev, staging)
+aws_region  = "us-east-2"              # AWS region for deployment
+
+# Networking - Using 2 AZs for free tier
+vpc_cidr           = "10.0.0.0/16"     # VPC CIDR block
+availability_zones = [                  # List of AZs to use
+  "us-east-2a",
+  "us-east-2b"
+]
+private_subnet     = ""                 # Your private subnet ID (will be created by terraform)
+
+# Container
+container_image_tag = "latest"          # ECR image tag to deploy
+weather_source_api_key = ""             # Your Weather Source API key
+
+# Redshift - Free tier compatible
+redshift_cluster_identifier = "prod-weather-source"  # Cluster identifier
+redshift_database_name     = "weather_source"       # Database name
+redshift_master_username   = "admin"                # Master username
+redshift_master_password   = ""                     # Master password (min 8 chars, uppercase, lowercase, number)
+redshift_node_type        = "dc2.large"            # Node type (free tier: dc2.large)
+redshift_number_of_nodes  = 1                      # Number of nodes (free tier: 1)
+
+# CloudWatch Logs - Free tier compatible
+log_retention_days = 7                  # Number of days to retain CloudWatch logs
+
+# Tags
+common_tags = {
+  Project     = "weather-source-etl"    # Project name
+  Environment = "prod"                  # Environment name
+  ManagedBy   = "terraform"            # Managed by
+  Owner       = "data-team"            # Team ownership
+} 

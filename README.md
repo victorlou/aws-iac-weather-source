@@ -6,6 +6,10 @@ This repository contains the Terraform configuration for deploying the Weather S
 ```
 .
 ├── terraform/          # Main infrastructure configuration
+│   ├── modules/       # Reusable infrastructure modules
+│   ├── env/          # Environment-specific configurations
+│   │   └── template.tfvars  # Template for terraform.tfvars
+│   └── *.tf          # Main Terraform configurations
 ├── terraform-backend/  # Backend infrastructure setup
 └── README.md          # This file
 ```
@@ -27,16 +31,15 @@ This repository contains the Terraform configuration for deploying the Weather S
     - Transition to Glacier after 180 days
 
 - **ECS (Elastic Container Service)**
-  - Single EC2 instance cluster (t2.micro)
-  - Task definitions for ETL processes:
+  - Fargate tasks for ETL processes
+  - Task definitions for:
     - Historical weather data collection
     - Weather forecast data collection
   - Scheduled tasks for three cities:
     - Washington DC (38.8552, -77.0513)
     - Paris (48.8647, 2.3490)
     - Auckland (-36.8484, 174.7633)
-  - Tasks run every 2 hours starting at X:01
-  - Auto Scaling Group for container management
+  - Tasks run every 5 minutes
   - CloudWatch logging enabled
 
 - **Redshift**
@@ -46,27 +49,8 @@ This repository contains the Terraform configuration for deploying the Weather S
     - Silver: Cleaned and transformed data
     - Gold: Business-ready data
   - Automated data loading from S3
-  - Scheduled data refresh every 2 hours (at X:05)
+  - Scheduled data refresh every 5 minutes
   - Secure access through VPC endpoints
-
-### Backend Infrastructure
-- **S3 State Bucket**: `terraform-state-${account_id}`
-  - Versioning enabled
-  - Server-side encryption (AES-256)
-  - Public access blocked
-  - Lifecycle policy to prevent accidental deletion
-
-- **DynamoDB State Lock**: `terraform-state-lock`
-  - Pay-per-request billing
-  - Prevents concurrent state modifications
-
-### Security Features
-- All resources deployed in private subnets where possible
-- Security groups with minimal required access
-- Encryption enabled for data at rest and in transit
-- IAM roles with least privilege access
-- HTTPS/TLS for all API communications
-- Credentials stored in AWS Systems Manager Parameter Store
 
 ## Prerequisites
 
@@ -74,37 +58,25 @@ Before deploying this infrastructure, ensure you have:
 
 1. AWS CLI installed and configured with appropriate credentials
 2. Terraform (version >= 1.0.0) installed
-3. PostgreSQL client tools installed and in PATH (required for Redshift setup)
+3. PostgreSQL client tools installed (for Redshift setup)
 4. An AWS account with sufficient permissions
 
-### PostgreSQL Client Installation
+### Configuration Setup
 
-#### Windows
-1. Download PostgreSQL client tools from: https://www.postgresql.org/download/windows/
-2. Install the client tools (you don't need the full server)
-3. Add PostgreSQL bin directory to system PATH:
+A template file is provided at `terraform/env/template.tfvars` with all required variables and their descriptions. To get started:
+
+1. Copy the template to create your configuration:
+   ```bash
+   cp terraform/env/template.tfvars terraform/terraform.tfvars
    ```
-   C:\Program Files\PostgreSQL\<version>\bin
-   ```
 
-#### Linux
-For Debian/Ubuntu:
-```bash
-sudo apt update
-sudo apt install -y postgresql-client
-```
+2. Edit `terraform.tfvars` and fill in the required values:
+   - `private_subnet`: Your VPC's private subnet ID
+   - `weather_source_api_key`: Your Weather Source API key
+   - `redshift_master_password`: A strong password for Redshift
+   - Optionally modify other values as needed
 
-For RHEL/CentOS/Fedora:
-```bash
-sudo dnf install -y postgresql
-# or
-sudo yum install -y postgresql
-```
-
-For Amazon Linux:
-```bash
-sudo yum install -y postgresql15
-```
+The template is preconfigured with free tier compatible defaults where possible.
 
 ## Deployment Steps
 
@@ -131,91 +103,87 @@ sudo yum install -y postgresql15
 
 3. **Review and Apply Changes**
    ```bash
-   terraform plan -var-file="env/prod.tfvars"
-   terraform apply -var-file="env/prod.tfvars"
+   terraform plan
+   terraform apply
    ```
 
-4. **Verify Redshift Setup**
+## Post-Deployment Verification
+
+1. **Verify ECS Tasks**
    ```bash
-   # Test Redshift connection (replace with your cluster endpoint)
-   psql -h <cluster-endpoint> -U admin -d weather_source -p 5439
-   
-   # Verify schemas
-   \dn
-   
-   # List tables
-   \dt weather_source_bronze.*
+   aws ecs list-tasks --cluster <cluster-name>
    ```
 
-## Infrastructure Management
+2. **Check Redshift Connection**
+   ```bash
+   psql -h <cluster-endpoint> -U admin -d weather_source -p 5439
+   ```
 
-### Monitoring
-- CloudWatch Logs for ECS tasks
-- Redshift query monitoring
-- S3 access logs
-- VPC Flow Logs
-
-### Maintenance
-- Regular updates to task definitions
-- Monitoring of Redshift performance
-- Review of S3 lifecycle transitions
-- Security group rule reviews
-
-### Cost Management
-- Most resources within free tier limits
-- S3 lifecycle policies for cost optimization
-- Single-node Redshift cluster (free tier)
-- Scheduled scaling for ECS tasks
+3. **Verify Data Flow**
+   ```sql
+   -- Check bronze layer tables
+   SELECT COUNT(*) FROM prod_weather_source_bronze.historical;
+   SELECT COUNT(*) FROM prod_weather_source_bronze.forecast;
+   
+   -- Check latest data
+   SELECT MAX(timestamp_utc) FROM prod_weather_source_bronze.historical;
+   ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **PostgreSQL Client Issues**
-   - Ensure PostgreSQL client is installed
-   - Verify PATH environment variable
-   - Check Redshift security group rules
-
-2. **ECS Task Failures**
-   - Check CloudWatch Logs
+1. **ECS Task Failures**
+   - Check CloudWatch Logs at `/aws/ecs/${environment}-weather-source`
    - Verify task role permissions
    - Check container resource limits
 
-3. **Redshift Connection Issues**
+2. **Redshift Connection Issues**
    - Verify security group rules
    - Check VPC endpoint configuration
    - Validate database credentials
 
-4. **S3 Data Loading**
+3. **Data Loading Issues**
+   - Check S3 bucket permissions
    - Verify IAM role permissions
-   - Check S3 bucket policies
-   - Review COPY command syntax
+   - Review CloudWatch logs for Redshift scheduled queries
 
-## Important Notes
+### Useful Commands
 
-1. **Costs**: While optimized for free tier, some services may incur charges:
-   - NAT Gateway ($0.045 per hour + data processing)
-   - S3 storage and requests
-   - Data transfer costs
+```bash
+# Check ECS task status
+aws ecs list-tasks --cluster <cluster-name>
 
-2. **Security**:
-   - Regularly rotate Redshift credentials
-   - Monitor security group changes
-   - Review IAM role permissions
-   - Enable AWS CloudTrail
+# View CloudWatch logs
+aws logs get-log-events --log-group-name /aws/ecs/prod-weather-source
 
-3. **Maintenance**:
-   - Regular backups are automated
-   - Monitor disk usage in Redshift
-   - Review CloudWatch metrics
-   - Check S3 lifecycle transitions
+# Check Redshift query history
+aws redshift-data list-statements
+```
 
-## Customization
+## Security Notes
 
-The infrastructure can be customized through variables in `env/prod.tfvars`:
-- AWS region (default: us-east-2)
-- Environment name
-- VPC CIDR ranges
-- Instance types and sizes
-- Redshift cluster configuration
-- Monitoring and backup settings
+1. **Credentials Management**
+   - Redshift passwords are stored in AWS Systems Manager Parameter Store
+   - API keys are passed through environment variables
+   - All sensitive data is encrypted at rest
+
+2. **Network Security**
+   - All services run in private subnets
+   - Access controlled via security groups
+   - VPC endpoints used for AWS service access
+
+3. **Monitoring**
+   - CloudWatch logs enabled for all services
+   - Redshift query logging active
+   - VPC Flow Logs available for network monitoring
+
+## Cost Management
+
+Most services are configured to stay within AWS free tier limits:
+- Redshift: Single dc2.large node
+- ECS: Fargate tasks with minimal resources
+- S3: Lifecycle policies for cost optimization
+- CloudWatch: 7-day log retention
+
+Monitor costs through AWS Cost Explorer and set up billing alarms if needed.
