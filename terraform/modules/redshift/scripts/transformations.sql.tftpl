@@ -1,0 +1,208 @@
+-- Silver Layer Views
+CREATE OR REPLACE VIEW ${environment}_weather_source_silver.historical_cleaned AS
+SELECT 
+    id,
+    city,
+    latitude,
+    longitude,
+    timezone,
+    country_code,
+    country_name,
+    timestamp_utc,
+    temp,
+    feels_like,
+    precip,
+    wind_spd,
+    rel_hum,
+    -- Add standardized temperature (Celsius to Fahrenheit)
+    temp * 9/5 + 32 as temp_f,
+    -- Add standardized wind speed (m/s to mph)
+    wind_spd * 2.237 as wind_spd_mph,
+    -- Add temperature categories
+    CASE 
+        WHEN temp < 0 THEN 'freezing'
+        WHEN temp < 10 THEN 'cold'
+        WHEN temp < 20 THEN 'mild'
+        WHEN temp < 30 THEN 'warm'
+        ELSE 'hot'
+    END as temp_category,
+    'historical' as data_type
+FROM ${environment}_weather_source_bronze.historical;
+
+-- Forecast data
+CREATE OR REPLACE VIEW ${environment}_weather_source_silver.forecast_cleaned AS
+SELECT 
+    id,
+    city,
+    latitude,
+    longitude,
+    timezone,
+    country_code,
+    country_name,
+    timestamp_utc,
+    temp,
+    feels_like,
+    precip,
+    wind_spd,
+    rel_hum,
+    -- Add standardized temperature (Celsius to Fahrenheit)
+    temp * 9/5 + 32 as temp_f,
+    -- Add standardized wind speed (m/s to mph)
+    wind_spd * 2.237 as wind_spd_mph,
+    -- Add temperature categories
+    CASE 
+        WHEN temp < 0 THEN 'freezing'
+        WHEN temp < 10 THEN 'cold'
+        WHEN temp < 20 THEN 'mild'
+        WHEN temp < 30 THEN 'warm'
+        ELSE 'hot'
+    END as temp_category,
+    timestamp_init_utc,
+    'forecast' as data_type
+FROM ${environment}_weather_source_bronze.forecast;
+
+-- Gold Layer - Normalized Tables/Views
+
+-- 1. Location dimension
+CREATE OR REPLACE VIEW ${environment}_weather_source_gold.dim_location AS
+WITH combined_data AS (
+    SELECT city, latitude, longitude, timezone, country_code, country_name 
+    FROM ${environment}_weather_source_silver.historical_cleaned
+    UNION
+    SELECT city, latitude, longitude, timezone, country_code, country_name 
+    FROM ${environment}_weather_source_silver.forecast_cleaned
+)
+SELECT DISTINCT
+    city,
+    latitude,
+    longitude,
+    timezone,
+    country_code,
+    country_name,
+    -- Add geographical categorization
+    CASE 
+        WHEN latitude > 0 THEN 'Northern Hemisphere'
+        ELSE 'Southern Hemisphere'
+    END as hemisphere,
+    CASE 
+        WHEN longitude >= -180 AND longitude < -90 THEN 'Eastern Pacific'
+        WHEN longitude >= -90 AND longitude < 0 THEN 'Americas'
+        WHEN longitude >= 0 AND longitude < 90 THEN 'Europe/Africa'
+        ELSE 'Asia/Pacific'
+    END as region
+FROM combined_data;
+
+-- 2. Time dimension
+CREATE OR REPLACE VIEW ${environment}_weather_source_gold.dim_time AS
+WITH combined_timestamps AS (
+    SELECT timestamp_utc FROM ${environment}_weather_source_silver.historical_cleaned
+    UNION
+    SELECT timestamp_utc FROM ${environment}_weather_source_silver.forecast_cleaned
+)
+SELECT DISTINCT
+    timestamp_utc,
+    DATE_TRUNC('day', timestamp_utc) as date,
+    DATE_PART('hour', timestamp_utc) as hour,
+    DATE_PART('month', timestamp_utc) as month,
+    DATE_PART('year', timestamp_utc) as year,
+    CASE 
+        WHEN DATE_PART('month', timestamp_utc) IN (12, 1, 2) THEN 'Winter'
+        WHEN DATE_PART('month', timestamp_utc) IN (3, 4, 5) THEN 'Spring'
+        WHEN DATE_PART('month', timestamp_utc) IN (6, 7, 8) THEN 'Summer'
+        ELSE 'Fall'
+    END as season
+FROM combined_timestamps;
+
+-- 3. Weather facts
+CREATE OR REPLACE VIEW ${environment}_weather_source_gold.fact_weather AS
+WITH combined_weather AS (
+    SELECT * FROM ${environment}_weather_source_silver.historical_cleaned
+    UNION ALL
+    SELECT * FROM ${environment}_weather_source_silver.forecast_cleaned
+)
+SELECT 
+    id,
+    city,
+    timestamp_utc,
+    temp,
+    temp_f,
+    feels_like,
+    precip,
+    wind_spd,
+    wind_spd_mph,
+    rel_hum,
+    temp_category,
+    data_type
+FROM combined_weather;
+
+-- Gold Layer - Denormalized Views for AI/ML
+
+-- 1. Daily weather patterns
+CREATE OR REPLACE VIEW ${environment}_weather_source_gold.daily_weather_patterns AS
+WITH daily_stats AS (
+    SELECT 
+        f.city,
+        f.data_type,
+        t.date,
+        t.season,
+        AVG(f.temp) as avg_temp,
+        MAX(f.temp) as max_temp,
+        MIN(f.temp) as min_temp,
+        SUM(f.precip) as total_precip,
+        AVG(f.wind_spd) as avg_wind_speed,
+        AVG(f.rel_hum) as avg_humidity
+    FROM ${environment}_weather_source_gold.fact_weather f
+    JOIN ${environment}_weather_source_gold.dim_time t ON f.timestamp_utc = t.timestamp_utc
+    GROUP BY f.city, f.data_type, t.date, t.season
+)
+SELECT 
+    d.*,
+    l.country_name,
+    l.hemisphere,
+    l.region,
+    CASE 
+        WHEN d.total_precip > 25 THEN 'Heavy Rain'
+        WHEN d.total_precip > 10 THEN 'Moderate Rain'
+        WHEN d.total_precip > 0 THEN 'Light Rain'
+        WHEN d.avg_temp < 0 THEN 'Freezing'
+        WHEN d.avg_wind_speed > 10 THEN 'Windy'
+        WHEN d.avg_humidity > 80 THEN 'Humid'
+        ELSE 'Mild'
+    END as weather_pattern
+FROM daily_stats d
+JOIN ${environment}_weather_source_gold.dim_location l ON d.city = l.city;
+
+-- 2. Extreme Weather Events
+CREATE OR REPLACE VIEW ${environment}_weather_source_gold.extreme_weather_events AS
+WITH daily_extremes AS (
+    SELECT 
+        f.city,
+        f.data_type,
+        t.date,
+        t.season,
+        MAX(f.temp) as max_temp,
+        MIN(f.temp) as min_temp,
+        SUM(f.precip) as total_precip,
+        MAX(f.wind_spd) as max_wind_speed
+    FROM ${environment}_weather_source_gold.fact_weather f
+    JOIN ${environment}_weather_source_gold.dim_time t ON f.timestamp_utc = t.timestamp_utc
+    GROUP BY f.city, f.data_type, t.date, t.season
+    HAVING MAX(f.temp) > 35 
+        OR MIN(f.temp) < -10 
+        OR SUM(f.precip) > 50 
+        OR MAX(f.wind_spd) > 20
+)
+SELECT 
+    d.*,
+    l.country_name,
+    l.hemisphere,
+    l.region,
+    CASE 
+        WHEN d.max_temp > 35 THEN 'Extreme Heat'
+        WHEN d.min_temp < -10 THEN 'Extreme Cold'
+        WHEN d.total_precip > 50 THEN 'Flooding Risk'
+        WHEN d.max_wind_speed > 20 THEN 'Storm Conditions'
+        ELSE 'Normal'
+    END as extreme_condition_type
+FROM daily_extremes d
+JOIN ${environment}_weather_source_gold.dim_location l ON d.city = l.city;
